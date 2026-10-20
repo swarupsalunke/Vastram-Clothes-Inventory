@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
+import { Toaster, toast } from "sonner";
 import { LayoutDashboard, Package, ReceiptText, History, Users, CalendarCheck, Wallet, Truck, Menu, Search, Plus, Eye, Pencil, Trash2, X, Shirt, IndianRupee, AlertTriangle, RefreshCw } from "lucide-react";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
@@ -17,25 +18,28 @@ async function request(path, options = {}) {
 }
 export default function App() {
   const [page, setPage] = useState("dashboard"), [mobileOpen, setMobileOpen] = useState(false);
-  const [data, setData] = useState({}), [dash, setDash] = useState({}), [query, setQuery] = useState(""), [loading, setLoading] = useState(false), [error, setError] = useState("");
+  const [data, setData] = useState({}), [dash, setDash] = useState({}), [query, setQuery] = useState(""), [loading, setLoading] = useState(false);
   const [modal, setModal] = useState(null), [form, setForm] = useState({}), [viewRecord, setViewRecord] = useState(null);
   const [billItems, setBillItems] = useState([]), [customer, setCustomer] = useState({ customerName: "", customerPhone: "", paymentMethod: "Cash" });
   const [billProduct, setBillProduct] = useState(""), [billQty, setBillQty] = useState(1), [month, setMonth] = useState(new Date().toISOString().slice(0, 7)), [salary, setSalary] = useState(null);
   const resource = page === "bills" ? "bills" : page;
   const load = async () => {
-    setLoading(true); setError("");
+    setLoading(true);
     try {
       if (page === "dashboard") { setDash(await request("/dashboard")); }
-      else if (["products", "workers", "attendance", "bills", "expenses", "suppliers"].includes(page)) {
-        const rows = await request("/" + page + (query ? "?q=" + encodeURIComponent(query) : ""));
-        setData(p => ({ ...p, [page]: rows }));
-        if (page === "attendance") { const w = await request("/workers"); setData(p => ({ ...p, workers: w })); }
-        if (page === "billing") { const w = await request("/products"); setData(p => ({ ...p, products: w })); }
-      } else if (page === "billing") {
+      else if (page === "billing") {
         const products = await request("/products");
         setData(p => ({ ...p, products }));
       }
-    } catch (e) { setError(e.message + " — check that backend and MongoDB are running."); }
+      else if (["products", "workers", "attendance", "bills", "expenses", "suppliers"].includes(page)) {
+        const rows = await request("/" + page + (query ? "?q=" + encodeURIComponent(query) : ""));
+        setData(p => ({ ...p, [page]: rows }));
+        if (page === "attendance") {
+          const w = await request("/workers");
+          setData(p => ({ ...p, workers: w }));
+        }
+      }
+    } catch (e) { toast.error(e.message + " — check that backend and MongoDB are running."); }
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, [page, query]);
@@ -46,35 +50,48 @@ export default function App() {
     try {
       const r = modal.resource; const payload = { ...form }; delete payload._id; delete payload.__v; delete payload.createdAt; delete payload.updatedAt;
       await request("/" + r + (modal.type === "edit" ? "/" + modal.id : ""), { method: modal.type === "edit" ? "PUT" : "POST", body: JSON.stringify(payload) });
-      setModal(null); await load();
-    } catch (e) { setError(e.message); }
+      setModal(null); toast.success(modal.type === "edit" ? "Record updated successfully" : "Record added successfully"); await load();
+    } catch (e) { toast.error(e.message); }
   };
   const remove = async (r) => {
     if (!confirm("Delete this record permanently?")) return;
-    try { await request("/" + page + "/" + r._id, { method: "DELETE" }); await load(); } catch (e) { setError(e.message); }
+    try { await request("/" + page + "/" + r._id, { method: "DELETE" }); toast.success("Record deleted successfully"); await load(); } catch (e) { toast.error(e.message); }
   };
   const addBillItem = () => {
     const p = (data.products || []).find(x => x._id === billProduct);
-    if (!p) return alert("Please select a product.");
-    if (Number(billQty) < 1 || Number(billQty) > Number(p.quantity)) return alert("Quantity exceeds available stock.");
+    if (!p) return toast.error("Please select a product.");
+    if (Number(billQty) < 1 || Number(billQty) > Number(p.quantity)) return toast.error("Quantity exceeds available stock.");
     const found = billItems.find(x => x.productId === p._id);
     if (found) { setBillItems(billItems.map(x => x.productId === p._id ? { ...x, quantity: Number(x.quantity) + Number(billQty) } : x)); }
-    else setBillItems([...billItems, { productId: p._id, name: p.name, sku: p.sku, price: Number(p.price || 0), quantity: Number(billQty) }]);
+    else setBillItems([...billItems, {
+      productId: p._id,
+      name: p.name,
+      sku: p.sku,
+      originalPrice: Number(p.price || 0),
+      price: Number(p.price || 0),
+      quantity: Number(billQty)
+    }]);
     setBillProduct(""); setBillQty(1);
   };
   const createBill = async () => {
     try {
-      const bill = await request("/bills/create", { method: "POST", body: JSON.stringify({ ...customer, items: billItems.map(x => ({ productId: x.productId, quantity: x.quantity, price: x.price })) }) });
-      alert("Bill saved: " + bill.invoiceNo); setBillItems([]); setCustomer({ customerName: "", customerPhone: "", paymentMethod: "Cash" }); setPage("bills");
-    } catch (e) { setError(e.message); }
+      const bill = await request("/bills/create", { method: "POST", body: JSON.stringify({ ...customer, items: billItems.map(x => ({
+          productId: x.productId,
+          quantity: Number(x.quantity),
+          originalPrice: Number(x.originalPrice ?? x.price),
+          price: Number(x.price)
+        })) }) });
+      toast.success("Bill saved successfully: " + bill.invoiceNo); setBillItems([]); setCustomer({ customerName: "", customerPhone: "", paymentMethod: "Cash" }); setPage("bills");
+    } catch (e) { toast.error(e.message); }
   };
   const runSalary = async (workerId) => {
     if (!workerId) return setSalary(null);
-    try { setSalary(await request(`/workers/${workerId}/salary?month=${month}`)); } catch (e) { setError(e.message); }
+    try { setSalary(await request(`/workers/${workerId}/salary?month=${month}`)); } catch (e) { toast.error(e.message); }
   };
   const title = nav.find(n => n[1] === page)?.[0] || "Dashboard";
   const displayRows = page === "bills" ? rows : rows;
   return <div className="app-shell">
+    <Toaster position="top-right" richColors closeButton />
     <aside className={`sidebar ${mobileOpen ? "show" : ""}`}>
       <div className="brand"><div className="brand-icon"><Shirt size={22} /></div><div><b>Vastram</b><small>Men's, Women's & Kid's Wear</small></div><button className="close-side" onClick={() => setMobileOpen(false)}><X /></button></div>
       <div className="nav-label">WORKSPACE</div>
@@ -85,7 +102,6 @@ export default function App() {
     <main className="main">
       <header className="topbar"><button className="menu-btn" onClick={() => setMobileOpen(true)}><Menu /></button><div className="crumb">Workspace <span>/</span> <b>{title}</b></div><div className="top-right"><span className="status-dot" /> Admin - Rohit <div className="user-circle">V.</div></div></header>
       <div className="content">
-        {error && <div className="error"><AlertTriangle size={18} /><span>{error}</span><button onClick={() => setError("")}><X size={16} /></button></div>}
         {loading && <div className="loading"><RefreshCw size={16} /> Loading data…</div>}
         {page === "dashboard" && <Dashboard dash={dash} setPage={setPage} />}
         {page === "billing" && <section>
@@ -93,9 +109,28 @@ export default function App() {
           <div className="billing-grid">
             <div className="panel"><h3>Customer details</h3><div className="form-grid"><Field label="Customer name (optional)" value={customer.customerName} onChange={v => setCustomer({ ...customer, customerName: v })} /><Field label="Phone (optional)" value={customer.customerPhone} onChange={v => setCustomer({ ...customer, customerPhone: v })} /><label className="field"><span>Payment method</span><select value={customer.paymentMethod} onChange={e => setCustomer({ ...customer, paymentMethod: e.target.value })}><option>Cash</option><option>UPI</option><option>Card</option><option>Credit</option></select></label></div>
               <h3 className="section-gap">Add products</h3><div className="add-product"><select value={billProduct} onChange={e => setBillProduct(e.target.value)}><option value="">Choose product</option>{(data.products || []).map(p => <option key={p._id} value={p._id}>{p.name} · Stock {p.quantity} · {money(p.price)}</option>)}</select><input type="number" min="1" value={billQty} onChange={e => setBillQty(e.target.value)} /><button className="primary" onClick={addBillItem}><Plus size={16} /> Add</button></div>
-              <div className="table-wrap"><table><thead><tr><th>Product</th><th>Qty</th><th>Price</th><th>Total</th><th></th></tr></thead><tbody>{billItems.map(i => <tr key={i.productId}><td>{i.name}</td><td>{i.quantity}</td><td>{money(i.price)}</td><td>{money(i.price * i.quantity)}</td><td><button className="icon-btn danger" onClick={() => setBillItems(billItems.filter(x => x.productId !== i.productId))}><Trash2 size={15} /></button></td></tr>)}{!billItems.length && <Empty col={5} text="Add products to start the bill." />}</tbody></table></div>
+              <div className="table-wrap"><table><thead><tr><th>Product</th><th>Qty</th><th>Original price</th><th>Selling price (editable)</th><th>Discount</th><th>Total</th><th></th></tr></thead><tbody>{billItems.map(i => {
+                const discount = Math.max(0, Number(i.originalPrice || 0) - Number(i.price || 0));
+                return <tr key={i.productId}>
+                  <td><div className="main-cell">{i.name}</div><small className="muted">{i.sku || ""}</small></td>
+                  <td><input aria-label={"Quantity for " + i.name} className="bill-edit-input qty-input" type="number" min="1" value={i.quantity} onChange={e => {
+                    const value = Math.max(1, Number(e.target.value || 1));
+                    const product = (data.products || []).find(p => p._id === i.productId);
+                    if (product && value > Number(product.quantity || 0)) { toast.error("Quantity exceeds available stock for " + i.name); return; }
+                    setBillItems(items => items.map(x => x.productId === i.productId ? {...x, quantity:value} : x));
+                  }} /></td>
+                  <td>{money(i.originalPrice)}</td>
+                  <td><input aria-label={"Selling price for " + i.name} className="bill-edit-input price-input" type="number" min="0" step="0.01" value={i.price} onChange={e => {
+                    const value = e.target.value;
+                    setBillItems(items => items.map(x => x.productId === i.productId ? {...x, price:value === "" ? 0 : Math.max(0, Number(value))} : x));
+                  }} /></td>
+                  <td><span className={discount > 0 ? "discount-value" : "muted"}>{discount > 0 ? money(discount) : "—"}</span></td>
+                  <td><b>{money(Number(i.price) * Number(i.quantity))}</b></td>
+                  <td><button title="Remove item" className="icon-btn danger" onClick={() => setBillItems(billItems.filter(x => x.productId !== i.productId))}><Trash2 size={15} /></button></td>
+                </tr>;
+              })}{!billItems.length && <Empty col={7} text="Add products to start the bill." />}</tbody></table></div>
             </div>
-            <div className="panel bill-summary"><div className="summary-icon"><ReceiptText /></div><h3>Invoice summary</h3><p>Items in bill <b>{billItems.reduce((s, i) => s + Number(i.quantity), 0)}</b></p><p>Subtotal <b>{money(billItems.reduce((s, i) => s + i.price * i.quantity, 0))}</b></p><div className="total-row"><span>Total due</span><strong>{money(billItems.reduce((s, i) => s + i.price * i.quantity, 0))}</strong></div><button className="primary full" disabled={!billItems.length} onClick={createBill}>Save bill</button><small>Saving a bill deducts sold quantities from stock.</small></div>
+            <div className="panel bill-summary"><div className="summary-icon"><ReceiptText /></div><h3>Invoice summary</h3><p>Items in bill <b>{billItems.reduce((s, i) => s + Number(i.quantity), 0)}</b></p><p>Subtotal <b>{money(billItems.reduce((s, i) => s + Number(i.price) * Number(i.quantity), 0))}</b></p><div className="total-row"><span>Total due</span><strong>{money(billItems.reduce((s, i) => s + Number(i.price) * Number(i.quantity), 0))}</strong></div><button className="primary full" disabled={!billItems.length} onClick={createBill}>Save bill</button><small>Saving a bill deducts sold quantities from stock.</small></div>
           </div>
         </section>}
         {["products", "workers", "attendance", "bills", "expenses", "suppliers"].includes(page) && <section>
@@ -117,7 +152,10 @@ export default function App() {
       </div>
     </main>
     {modal && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setModal(null) }}><div className="modal"><div className="modal-head"><div><h2>{modal.type === "edit" ? "Edit" : "Add"} {modal.resource.slice(0, -1).replace(/^./, c => c.toUpperCase())}</h2><p>Fields marked with * are recommended.</p></div><button className="icon-btn" onClick={() => setModal(null)}><X /></button></div><div className="form-grid">{Object.entries(form).filter(([k]) => !["_id", "__v", "createdAt", "updatedAt", "items", "total", "invoiceNo", "billDate"].includes(k)).map(([k, v]) => <label className="field" key={k}><span>{pretty(k)}</span>{k === "status" && modal.resource === "attendance" ? <select value={v || "Present"} onChange={e => setForm({ ...form, [k]: e.target.value })}><option>Present</option><option>Absent</option><option>Half Day</option><option>Leave</option></select> : k === "workerId" ? <select value={v || ""} onChange={e => { const w = (data.workers || []).find(x => x._id === e.target.value); setForm({ ...form, workerId: e.target.value, workerName: w?.name || "" }) }}><option value="">Select worker</option>{(data.workers || []).map(w => <option key={w._id} value={w._id}>{w.name}</option>)}</select> : k === "date" || k === "joiningDate" ? <input type="date" value={v || ""} onChange={e => setForm({ ...form, [k]: e.target.value })} /> : ["quantity", "price", "dailySalary", "amount", "reorderLevel"].includes(k) ? <input type="number" min="0" value={v ?? 0} onChange={e => setForm({ ...form, [k]: e.target.value })} /> : k === "address" || k === "notes" || k === "remarks" ? <textarea value={v || ""} onChange={e => setForm({ ...form, [k]: e.target.value })} /> : <input value={v ?? ""} onChange={e => setForm({ ...form, [k]: e.target.value })} />}</label>)}</div><div className="modal-actions"><button className="secondary" onClick={() => setModal(null)}>Cancel</button><button className="primary" onClick={save}>Save record</button></div></div></div>}
-    {viewRecord && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setViewRecord(null) }}><div className="modal"><div className="modal-head"><div><h2>Record details</h2><p>Saved information from the database</p></div><button className="icon-btn" onClick={() => setViewRecord(null)}><X /></button></div><div className="detail-grid">{Object.entries(viewRecord).filter(([k, v]) => !["_id", "__v"].includes(k) && typeof v !== "object").map(([k, v]) => <div className="detail-item" key={k}><small>{pretty(k)}</small><b>{String(v ?? "—")}</b></div>)}{viewRecord.items && <div className="detail-wide"><h3>Invoice items</h3>{viewRecord.items.map((i, n) => <p key={n}>{i.name} × {i.quantity} — {money(i.lineTotal)}</p>)}<h3>Total: {money(viewRecord.total)}</h3></div>}</div><div className="modal-actions"><button className="primary" onClick={() => setViewRecord(null)}>Close</button></div></div></div>}
+    {viewRecord && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setViewRecord(null) }}><div className="modal"><div className="modal-head"><div><h2>Record details</h2><p>Saved information from the database</p></div><button className="icon-btn" onClick={() => setViewRecord(null)}><X /></button></div><div className="detail-grid">{Object.entries(viewRecord).filter(([k, v]) => !["_id", "__v"].includes(k) && typeof v !== "object").map(([k, v]) => <div className="detail-item" key={k}><small>{pretty(k)}</small><b>{String(v ?? "—")}</b></div>)}{viewRecord.items && <div className="detail-wide"><h3>Invoice items</h3>{viewRecord.items.map((i, n) => <p key={n}>
+          {i.name} × {i.quantity} — Sold at {money(i.price)} each = {money(i.lineTotal ?? (Number(i.price || 0) * Number(i.quantity || 0)))}
+          {Number(i.originalPrice ?? i.price) > Number(i.price || 0) && <span className="muted"> (Original {money(i.originalPrice)}; discount {money(Number(i.originalPrice) - Number(i.price))} per piece)</span>}
+        </p>)}<h3>Total: {money(viewRecord.total)}</h3></div>}</div><div className="modal-actions"><button className="primary" onClick={() => setViewRecord(null)}>Close</button></div></div></div>}
   </div>
 }
 function pretty(s) { return s.replace(/([A-Z])/g, " $1").replace(/^./, c => c.toUpperCase()) }
