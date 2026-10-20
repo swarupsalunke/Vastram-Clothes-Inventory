@@ -75,12 +75,16 @@ export default function App() {
   };
   const createBill = async () => {
     try {
-      const bill = await request("/bills/create", { method: "POST", body: JSON.stringify({ ...customer, items: billItems.map(x => ({
-          productId: x.productId,
-          quantity: Number(x.quantity),
-          originalPrice: Number(x.originalPrice ?? x.price),
-          price: Number(x.price)
-        })) }) });
+      const bill = await request("/bills/create", {
+        method: "POST", body: JSON.stringify({
+          ...customer, items: billItems.map(x => ({
+            productId: x.productId,
+            quantity: Number(x.quantity),
+            originalPrice: Number(x.originalPrice ?? x.price),
+            price: Number(x.price)
+          }))
+        })
+      });
       toast.success("Bill saved successfully: " + bill.invoiceNo); setBillItems([]); setCustomer({ customerName: "", customerPhone: "", paymentMethod: "Cash" }); setPage("bills");
     } catch (e) { toast.error(e.message); }
   };
@@ -117,12 +121,12 @@ export default function App() {
                     const value = Math.max(1, Number(e.target.value || 1));
                     const product = (data.products || []).find(p => p._id === i.productId);
                     if (product && value > Number(product.quantity || 0)) { toast.error("Quantity exceeds available stock for " + i.name); return; }
-                    setBillItems(items => items.map(x => x.productId === i.productId ? {...x, quantity:value} : x));
+                    setBillItems(items => items.map(x => x.productId === i.productId ? { ...x, quantity: value } : x));
                   }} /></td>
                   <td>{money(i.originalPrice)}</td>
                   <td><input aria-label={"Selling price for " + i.name} className="bill-edit-input price-input" type="number" min="0" step="0.01" value={i.price} onChange={e => {
                     const value = e.target.value;
-                    setBillItems(items => items.map(x => x.productId === i.productId ? {...x, price:value === "" ? 0 : Math.max(0, Number(value))} : x));
+                    setBillItems(items => items.map(x => x.productId === i.productId ? { ...x, price: value === "" ? 0 : Math.max(0, Number(value)) } : x));
                   }} /></td>
                   <td><span className={discount > 0 ? "discount-value" : "muted"}>{discount > 0 ? money(discount) : "—"}</span></td>
                   <td><b>{money(Number(i.price) * Number(i.quantity))}</b></td>
@@ -153,9 +157,9 @@ export default function App() {
     </main>
     {modal && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setModal(null) }}><div className="modal"><div className="modal-head"><div><h2>{modal.type === "edit" ? "Edit" : "Add"} {modal.resource.slice(0, -1).replace(/^./, c => c.toUpperCase())}</h2><p>Fields marked with * are recommended.</p></div><button className="icon-btn" onClick={() => setModal(null)}><X /></button></div><div className="form-grid">{Object.entries(form).filter(([k]) => !["_id", "__v", "createdAt", "updatedAt", "items", "total", "invoiceNo", "billDate"].includes(k)).map(([k, v]) => <label className="field" key={k}><span>{pretty(k)}</span>{k === "status" && modal.resource === "attendance" ? <select value={v || "Present"} onChange={e => setForm({ ...form, [k]: e.target.value })}><option>Present</option><option>Absent</option><option>Half Day</option><option>Leave</option></select> : k === "workerId" ? <select value={v || ""} onChange={e => { const w = (data.workers || []).find(x => x._id === e.target.value); setForm({ ...form, workerId: e.target.value, workerName: w?.name || "" }) }}><option value="">Select worker</option>{(data.workers || []).map(w => <option key={w._id} value={w._id}>{w.name}</option>)}</select> : k === "date" || k === "joiningDate" ? <input type="date" value={v || ""} onChange={e => setForm({ ...form, [k]: e.target.value })} /> : ["quantity", "price", "dailySalary", "amount", "reorderLevel"].includes(k) ? <input type="number" min="0" value={v ?? 0} onChange={e => setForm({ ...form, [k]: e.target.value })} /> : k === "address" || k === "notes" || k === "remarks" ? <textarea value={v || ""} onChange={e => setForm({ ...form, [k]: e.target.value })} /> : <input value={v ?? ""} onChange={e => setForm({ ...form, [k]: e.target.value })} />}</label>)}</div><div className="modal-actions"><button className="secondary" onClick={() => setModal(null)}>Cancel</button><button className="primary" onClick={save}>Save record</button></div></div></div>}
     {viewRecord && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setViewRecord(null) }}><div className="modal"><div className="modal-head"><div><h2>Record details</h2><p>Saved information from the database</p></div><button className="icon-btn" onClick={() => setViewRecord(null)}><X /></button></div><div className="detail-grid">{Object.entries(viewRecord).filter(([k, v]) => !["_id", "__v"].includes(k) && typeof v !== "object").map(([k, v]) => <div className="detail-item" key={k}><small>{pretty(k)}</small><b>{String(v ?? "—")}</b></div>)}{viewRecord.items && <div className="detail-wide"><h3>Invoice items</h3>{viewRecord.items.map((i, n) => <p key={n}>
-          {i.name} × {i.quantity} — Sold at {money(i.price)} each = {money(i.lineTotal ?? (Number(i.price || 0) * Number(i.quantity || 0)))}
-          {Number(i.originalPrice ?? i.price) > Number(i.price || 0) && <span className="muted"> (Original {money(i.originalPrice)}; discount {money(Number(i.originalPrice) - Number(i.price))} per piece)</span>}
-        </p>)}<h3>Total: {money(viewRecord.total)}</h3></div>}</div><div className="modal-actions"><button className="primary" onClick={() => setViewRecord(null)}>Close</button></div></div></div>}
+      {i.name} × {i.quantity} — Sold at {money(i.price)} each = {money(i.lineTotal ?? (Number(i.price || 0) * Number(i.quantity || 0)))}
+      {Number(i.originalPrice ?? i.price) > Number(i.price || 0) && <span className="muted"> (Original {money(i.originalPrice)}; discount {money(Number(i.originalPrice) - Number(i.price))} per piece)</span>}
+    </p>)}<h3>Total: {money(viewRecord.total)}</h3></div>}</div><div className="modal-actions"><button className="primary" onClick={() => setViewRecord(null)}>Close</button></div></div></div>}
   </div>
 }
 function pretty(s) { return s.replace(/([A-Z])/g, " $1").replace(/^./, c => c.toUpperCase()) }
